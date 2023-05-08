@@ -18,9 +18,15 @@ fn main() -> RedisResult<()> {
         let res_group : Vec<types::Group>= conn.xinfo_groups("mystream")?;
         let group = res_group.get(0).unwrap();
         if group.consumers * 2 > group.pending {
-            println!("need more jobs")
+            println!("need more jobs");
+            conn.xadd(
+                "mystream", 
+                "*",
+                &[("START", "10"), ("END", "11"), ("API", "url1")])?;
+        } else {
+            println!("pending too many jobs")
         }
-        thread::sleep(time::Duration::from_secs(10));
+        // thread::sleep(time::Duration::from_secs(1));
     }
-    // Ok(())
+    Ok(())
 }
