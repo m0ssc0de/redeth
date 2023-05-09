@@ -2,10 +2,13 @@ use std::collections::HashMap;
 
 use redis::{FromRedisValue, RedisError, ErrorKind};
 use redis::{Client, Commands, RedisResult, Value };
+
+#[derive(Clone)]
 pub struct Group {
     pub name: String,
     pub consumers: u32,
     pub pending: u32,
+    pub lag: u32,
 }
 
 impl FromRedisValue for Group {
@@ -20,6 +23,9 @@ impl FromRedisValue for Group {
         let pending = hm.get("pending").and_then(|v| {
             Some(u32::from_redis_value(v))
         }).unwrap()?;
-        Ok(Group{name, consumers, pending})
+        let lag = hm.get("lag").and_then(|v| {
+            Some(u32::from_redis_value(v))
+        }).unwrap()?;
+        Ok(Group{name, consumers, pending, lag})
     }
 }
