@@ -15,13 +15,11 @@ let
 in
 pkgs.mkShell {
   buildInputs = [
+    pkgs.darwin.apple_sdk.frameworks.Security
     rust
   ] ++ (with pkgs; [
+    clang
     rust-analyzer
-    # pkg-config
-    # other dependencies
-    #gtk3
-    #wrapGAppsHook
   ]);
   RUST_BACKTRACE = 1;
 }

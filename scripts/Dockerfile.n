@@ -1,0 +1,5 @@
+FROM nixos/nix:2.16.0pre20230514_454e273
+COPY default.nix worker.sh /
+# COPY worker.sh /worker.sh
+RUN nix-shell /default.nix
+CMD ["/worker.sh"]
