@@ -82,7 +82,7 @@ done
 while true
 do
 {
-    redis-cli XREADGROUP GROUP $GROUP_ID $WORKER_ID COUNT 1 STREAMS $STREAM_ID \> > $INFO_FILE
+    redis-cli XREADGROUP GROUP $GROUP_ID $WORKER_ID BLOCK 0 STREAMS $STREAM_ID \> > $INFO_FILE
     if [ "$(wc -l < $INFO_FILE)" -eq $JOB_LINES ]; then
         echo "GET NEW JOB & EXEC IT"
         cat $INFO_FILE
