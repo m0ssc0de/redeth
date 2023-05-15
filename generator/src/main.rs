@@ -13,24 +13,27 @@ mod types;
 mod utils;
 mod errors;
 
-const MAX_JOB_SIZE: u64 = 500;
-const INIT_FROM: u64 = 13;
-const DYNAMIC_FROM: u64 = 1;
+const MAX_JOB_SIZE: u64 = 2;
 const MINI_PARTITION_SIZE: u64 = 1000;
 const MY_STREAM: &str = "mystream";
+const REDIS_KEY_START: &str = "jobsto";
 
 fn main() -> Result<(), errors::Error> {
     println!("hi");
 
-    // let url = "https://polygon.api.onfinality.io/rpc?apikey=bb33ca96-9719-497e-bf06-c291ffed46b4";
-    let url = "https://polygon-rpc.com/";
+    let url = "https://polygon.api.onfinality.io/rpc?apikey=bb33ca96-9719-497e-bf06-c291ffed46b4";
+    // let url = "https://polygon-rpc.com/";
     let bucket = "moss-temp";
 
 //     // Connect to Redis
     let client = Client::open("redis://127.0.0.1/")?;
     let mut conn = client.get_connection()?;
 
-    let mut start = 3;
+    // let mut start = 42719300;
+    let mut start: u64 = match conn.get(REDIS_KEY_START)? {
+        Some(v) => {v},
+        None => {0},
+    };
     let mut end = get_block_number(url, "latest", 0)?;
     println!("main from start {} end {}", start, end);
 
@@ -53,13 +56,13 @@ fn main() -> Result<(), errors::Error> {
         };
         println!("group consumers {}, pending {}, lag {}", group.consumers, group.pending, group.lag);
 
-        let jobs_cache_size = group.consumers * 2 - group.lag;
-        if jobs_cache_size <= 0 {
-            // works are busy
+        let jobs_cache_size = if group.consumers * 2 < group.lag {
             println!("so many waiting jobs");
             thread::sleep(time::Duration::from_secs(1));
             continue;
-        }
+        } else {
+            group.consumers * 2 - group.lag
+        };
 
         if start == end {
             println!("no more blocks");
@@ -95,6 +98,7 @@ fn main() -> Result<(), errors::Error> {
 
             conn.xadd(MY_STREAM, "*", job_params)?;
             start = job_end;
+            let _ = conn.set(REDIS_KEY_START, start)?;
             if jobs_end == job_end {
                 // end = start;
                 println!("time to break for start {} end {}", start, end);

@@ -9,6 +9,12 @@ INFO_FILE="${WORKER_ID}-JOB"
 JOB_LINES=10
 declare -A JOB
 
+UPLOADED_SET="uploaded:set"
+UPLOADED_STREAM=${UPLOADED_SET}:stream
+SORTED_POINTER="sorted"
+LAST_ID=$(redis-cli get $SORTED_POINTER); [[ -z "$LAST_ID" ]] && LAST_ID="-1"
+BUCKET_NAME="moss-temp"
+
 function readJob() {
     INFO_FILE="${WORKER_ID}-JOB"
     THE_LINE_OF_MSGID=2
@@ -67,6 +73,18 @@ function processJob() {
     rm -rf ${WKDIR}
 }
 
+function notifySorter() {
+    echo "====> "
+    START=${JOB[START]}
+    END=${JOB[END]}
+    ENDPOINT=${JOB[API]}
+    BUCKET_NAME=${JOB[BUCKET]}
+    WKDIR=${START}-${END}
+    redis-cli ZADD $UPLOADED_SET $START ${WKDIR}:$BUCKET_NAME
+    redis-cli XADD $UPLOADED_STREAM \* ${WKDIR}:$BUCKET_NAME $START
+    echo "=-=-=-=>"
+}
+
 # Process pending jobs
 until [ "$(redis-cli XREADGROUP GROUP $GROUP_ID $WORKER_ID COUNT 1 STREAMS $STREAM_ID 0 | tee $INFO_FILE | wc -l)" -ne $JOB_LINES ]
 do
@@ -74,6 +92,7 @@ do
     cat $INFO_FILE
     readJob
     processJob
+    notifySorter
     redis-cli XACK mystream $GROUP_ID ${JOB[MSGID]}
 
 done
@@ -88,7 +107,19 @@ do
         cat $INFO_FILE
         readJob
         processJob
+        notifySorter
         redis-cli XACK mystream $GROUP_ID ${JOB[MSGID]}
     fi
+    
+until [ "$(redis-cli XREADGROUP GROUP $GROUP_ID $WORKER_ID COUNT 1 STREAMS $STREAM_ID 0 | tee $INFO_FILE | wc -l)" -ne $JOB_LINES ]
+do
+    echo "GET PENDING JOB & EXEC IT"
+    cat $INFO_FILE
+    readJob
+    processJob
+    notifySorter
+    redis-cli XACK mystream $GROUP_ID ${JOB[MSGID]}
+
+done
 }
 done
