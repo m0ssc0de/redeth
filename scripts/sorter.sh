@@ -16,10 +16,10 @@ PROJECT_ID="${PROJECT_ID}"
 UPLOADED_SET="${PROJECT_ID}uploaded:set"
 UPLOADED_STREAM=${UPLOADED_SET}:stream
 SORTED_POINTER="${PROJECT_ID}sorted"
-LAST_ID=$(redis-cmd get $SORTED_POINTER); [[ -z "$LAST_ID" ]] && LAST_ID="-1"
 # BUCKET_NAME="moss-temp"
 
 while true; do
+    LAST_ID=$(redis-cmd get $SORTED_POINTER); [[ -z "$LAST_ID" ]] && LAST_ID="-1"
     data=$(redis-cmd ZRANGE $UPLOADED_SET 0 -1)
     [ -z "$data" ] && sleep 1 && continue
 

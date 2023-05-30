@@ -13,34 +13,35 @@ spec:
         app: my-app
     spec:
       volumes:
-      - name: gskey
-        secret:
-          secretName: storage-auth #kubectl create secret generic storage-auth --from-file=gskey.json=./gskey.json
-      containers:
-      - name: gen
-        image: yesq/generator
-        command: ["/bin/bash", "-c"]
-        args: ["generator"]
-        env:
-        - name: PROJECT_ID
-          value: "my-project"
-        - name: CHAIN_ENTRYPOINT
-          value: "https://polygon.api.onfinality.io/rpc?apikey=bb33ca96-9719-497e-bf06-c291ffed46b4"
-        - name: GOOGLE_BUCKET_NAME
-          value: "moss-temp"
-        - name: REDIS_ENTRYPOINT
-          value: "redis://:YourSecurePassword@redis-service/"
-      - name: sorter
-        image: yesq/scripts
-        command: ["/sorter.sh"]
-        workingDir: /workdir
-        env:
-        - name: PROJECT_ID
-          value: "my-project"
-        - name: REDIS_HOST
-          value: "redis-service"
-        - name: REDIS_PASSWORD
-          value: "YourSecurePassword"
-        volumeMounts:
         - name: gskey
-          mountPath: /gskey/
+          secret:
+            secretName: storage-auth #kubectl create secret generic storage-auth --from-file=gskey.json=./gskey.json
+      containers:
+        - name: gen
+          image: yesq/generator
+          command: ["/bin/bash", "-c"]
+          args: ["generator"]
+          env:
+            - name: PROJECT_ID
+              value: "my-project"
+            - name: CHAIN_ENTRYPOINT
+              value: "https://polygon.api.onfinality.io/rpc?apikey=bb33ca96-9719-497e-bf06-c291ffed46b4"
+            - name: GOOGLE_BUCKET_NAME
+              value: "moss-temp"
+            - name: REDIS_ENTRYPOINT
+              value: "redis://:YourSecurePassword@redis-service/"
+        - name: sorter
+          image: yesq/scripts
+          command: ["/bin/bash", "-c"]
+          args: ["/sorter.sh"]
+          workingDir: /workdir
+          env:
+            - name: PROJECT_ID
+              value: "my-project"
+            - name: REDIS_HOST
+              value: "redis-service"
+            - name: REDIS_PASSWORD
+              value: "YourSecurePassword"
+          volumeMounts:
+            - name: gskey
+              mountPath: /gskey/
