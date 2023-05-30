@@ -1,6 +1,5 @@
-FROM nixos/nix:2.16.0pre20230514_454e273
+FROM yesq/scripts:base
 COPY default.nix worker.sh sorter.sh /
 # COPY worker.sh /worker.sh
-WORKDIR /workdir
-RUN nix-shell /default.nix
+# RUN nix-shell /default.nix
 CMD ["/worker.sh"]

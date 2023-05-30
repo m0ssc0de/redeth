@@ -1,19 +1,32 @@
-#! /usr/bin/env nix-shell
-#! nix-shell -i bash /default.nix
+##! /usr/bin/env nix-shell
+##! nix-shell -i bash /default.nix
+#!/bin/bash
 set -eux
 
-STREAM_ID="${STREAM_ID:-mystream}"
-GROUP_ID="${GROUP_ID:-mygroup}"
-WORKER_ID="${WORKER_ID:-myid}"
+function redis-cmd() {
+    # Redis configuration
+    local REDIS_HOST="${REDIS_HOST:-localhost}"
+    local REDIS_PASSWORD="${REDIS_PASSWORD:-}"
+
+    # Connect to Redis and execute command
+    redis-cli -h "$REDIS_HOST" -a "$REDIS_PASSWORD" "$@"
+}
+PROJECT_ID="${PROJECT_ID}"
+STREAM_ID="${PROJECT_ID}-st"
+GROUP_ID="${PROJECT_ID}-gp"
+WORKER_ID="${HOSTNAME:-myid}"
 INFO_FILE="${WORKER_ID}-JOB"
 JOB_LINES=10
 declare -A JOB
 
-UPLOADED_SET="uploaded:set"
-UPLOADED_STREAM=${UPLOADED_SET}:stream
-SORTED_POINTER="sorted"
-LAST_ID=$(redis-cli get $SORTED_POINTER); [[ -z "$LAST_ID" ]] && LAST_ID="-1"
-BUCKET_NAME="moss-temp"
+UPLOADED_SET="${PROJECT_ID}uploaded:set"
+UPLOADED_STREAM="${UPLOADED_SET}:stream"
+SORTED_POINTER="${PROJECT_ID}sorted"
+LAST_ID=$(redis-cmd get $SORTED_POINTER); [[ -z "$LAST_ID" ]] && LAST_ID="-1"
+# BUCKET_NAME="${BUCKET_NAME}"
+
+gcloud auth activate-service-account --key-file /gskey/gskey.json
+
 
 function readJob() {
     INFO_FILE="${WORKER_ID}-JOB"
@@ -80,20 +93,20 @@ function notifySorter() {
     ENDPOINT=${JOB[API]}
     BUCKET_NAME=${JOB[BUCKET]}
     WKDIR=${START}-${END}
-    redis-cli ZADD $UPLOADED_SET $START ${WKDIR}:$BUCKET_NAME
-    redis-cli XADD $UPLOADED_STREAM \* ${WKDIR}:$BUCKET_NAME $START
+    redis-cmd ZADD $UPLOADED_SET $START ${WKDIR}:$BUCKET_NAME
+    redis-cmd XADD $UPLOADED_STREAM \* ${WKDIR}:$BUCKET_NAME $START
     echo "=-=-=-=>"
 }
 
 # Process pending jobs
-until [ "$(redis-cli XREADGROUP GROUP $GROUP_ID $WORKER_ID COUNT 1 STREAMS $STREAM_ID 0 | tee $INFO_FILE | wc -l)" -ne $JOB_LINES ]
+until [ "$(redis-cmd XREADGROUP GROUP $GROUP_ID $WORKER_ID COUNT 1 STREAMS $STREAM_ID 0 | tee $INFO_FILE | wc -l)" -ne $JOB_LINES ]
 do
     echo "GET PENDING JOB & EXEC IT"
     cat $INFO_FILE
     readJob
     processJob
     notifySorter
-    redis-cli XACK mystream $GROUP_ID ${JOB[MSGID]}
+    redis-cmd XACK $STREAM_ID $GROUP_ID ${JOB[MSGID]}
 
 done
 
@@ -101,24 +114,24 @@ done
 while true
 do
 {
-    redis-cli XREADGROUP GROUP $GROUP_ID $WORKER_ID BLOCK 0 STREAMS $STREAM_ID \> > $INFO_FILE
+    redis-cmd XREADGROUP GROUP $GROUP_ID $WORKER_ID BLOCK 0 STREAMS $STREAM_ID \> > $INFO_FILE
     if [ "$(wc -l < $INFO_FILE)" -eq $JOB_LINES ]; then
         echo "GET NEW JOB & EXEC IT"
         cat $INFO_FILE
         readJob
         processJob
         notifySorter
-        redis-cli XACK mystream $GROUP_ID ${JOB[MSGID]}
+        redis-cmd XACK $STREAM_ID $GROUP_ID ${JOB[MSGID]}
     fi
-    
-until [ "$(redis-cli XREADGROUP GROUP $GROUP_ID $WORKER_ID COUNT 1 STREAMS $STREAM_ID 0 | tee $INFO_FILE | wc -l)" -ne $JOB_LINES ]
+
+until [ "$(redis-cmd XREADGROUP GROUP $GROUP_ID $WORKER_ID COUNT 1 STREAMS $STREAM_ID 0 | tee $INFO_FILE | wc -l)" -ne $JOB_LINES ]
 do
     echo "GET PENDING JOB & EXEC IT"
     cat $INFO_FILE
     readJob
     processJob
     notifySorter
-    redis-cli XACK mystream $GROUP_ID ${JOB[MSGID]}
+    redis-cmd XACK $STREAM_ID $GROUP_ID ${JOB[MSGID]}
 
 done
 }

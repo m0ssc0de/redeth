@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use redis::{FromRedisValue, RedisError, ErrorKind};
-use redis::{Client, Commands, RedisResult, Value };
+use redis::{FromRedisValue};
+use redis::{RedisResult, Value };
 
 #[derive(Clone)]
 pub struct Group {
