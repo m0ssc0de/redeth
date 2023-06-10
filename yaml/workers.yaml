@@ -1,50 +1,60 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: worker
+  name: polygon-worker
 spec:
-  serviceName: worker
-  replicas: 2 # Adjust this number to change the number of worker pods
+  serviceName: polygon-worker
+  replicas: 2  # Adjust this number to change the number of worker pods
   selector:
     matchLabels:
-      app: worker
+      app: polygon-worker
   template:
     metadata:
       labels:
-        app: worker
+        app: polygon-worker
     spec:
       volumes:
-        - name: cache-volume
-          emptyDir:
-            sizeLimit: 10000Mi
-        - name: gskey
-          secret:
-            secretName: storage-auth #kubectl create secret generic storage-auth --from-file=gskey.json=./gskey.json
+      - name: cache-volume
+        emptyDir:
+          sizeLimit: 10000Mi
+      - name: gskey
+        secret:
+          secretName: storage-auth #kubectl create secret generic storage-auth --from-file=gskey.json=./gskey.json
+      nodeSelector:
+        "onfinality.io/role": sub
+      tolerations:
+      - key: "onfinality.io/role"
+        operator: "Equal"
+        value: "sub"
+        effect: "NoSchedule"
       containers:
-        - name: worker
-          image: yesq/scripts # Replace with your worker image
-          command: ["/worker.sh"] # Replace with your command
-          workingDir: /workdir
-          env:
-            - name: PROJECT_ID
-              value: "my-project"
-            - name: REDIS_HOST
-              value: "redis-service"
-            - name: REDIS_PASSWORD
-              value: "YourSecurePassword"
-          volumeMounts:
-            - mountPath: /workdir
-              name: cache-volume
-            - name: gskey
-              mountPath: /gskey/
+      - name: worker
+        image: yesq/scripts:from2 # Replace with your worker image
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            /worker.sh
+        workingDir: /workdir
+        env:
+        - name: PROJECT_ID
+          value: "polygon"
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: REDIS_PASSWORD
+          value: "YourSecurePassword"
+        volumeMounts:
+        - mountPath: /workdir
+          name: cache-volume
+        - name: gskey
+          mountPath: /gskey/
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: worker
+  name: polygon-worker
 spec:
   selector:
-    app: worker
+    app: polygon-worker
   ports:
     - protocol: TCP
       port: 8080
