@@ -20,10 +20,10 @@ spec:
       nodeSelector:
         "onfinality.io/role": sub
       tolerations:
-      - key: "onfinality.io/role"
-        operator: "Equal"
-        value: "sub"
-        effect: "NoSchedule"
+        - key: "onfinality.io/role"
+          operator: "Equal"
+          value: "sub"
+          effect: "NoSchedule"
       containers:
         - name: gen
           image: yesq/generator
@@ -34,6 +34,10 @@ spec:
               value: "polygon"
             - name: CHAIN_ENTRYPOINT
               value: "https://polygon.api.onfinality.io/rpc?apikey=bb33ca96-9719-497e-bf06-c291ffed46b4"
+            - name: CHAIN_LABEL
+              value: "latest"
+            - name: CHAIN_OFFSET
+              value: "50"
             - name: GOOGLE_BUCKET_NAME
               value: "subquery-polygon-chain"
             - name: REDIS_ENTRYPOINT
