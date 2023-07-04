@@ -37,7 +37,7 @@ spec:
             - name: CHAIN_LABEL
               value: "latest"
             - name: CHAIN_OFFSET
-              value: "50"
+              value: "300"
             - name: GOOGLE_BUCKET_NAME
               value: "subquery-polygon-chain"
             - name: REDIS_ENTRYPOINT
@@ -54,6 +54,8 @@ spec:
               value: "redis-service"
             - name: REDIS_PASSWORD
               value: "YourSecurePassword"
+            - name: DB_SCHEMA
+              value: "polygon-raw-0506"
           volumeMounts:
             - name: gskey
               mountPath: /gskey/

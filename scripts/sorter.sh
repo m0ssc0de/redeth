@@ -16,6 +16,10 @@ PROJECT_ID="${PROJECT_ID}"
 UPLOADED_SET="${PROJECT_ID}uploaded:set"
 UPLOADED_STREAM=${UPLOADED_SET}:stream
 SORTED_POINTER="${PROJECT_ID}sorted"
+DB_SCHEMA=${DB_SCHEMA}
+DB_HOST=${DB_HOST:-cockroachdb.cockroachdb}
+DB_PORT=${DB_PORT:-26257}
+DATABASE=${DATABASE:-postgres}
 # BUCKET_NAME="moss-temp"
 
 while true; do
@@ -51,6 +55,11 @@ while true; do
     gsutil -m cp -r -n $COPY_FROM gs://${bucket}
     IFS=" " DEL_IN_SET="${TO_RM[*]}"
     redis-cmd ZREM $UPLOADED_SET $DEL_IN_SET
+    SQL="UPDATE \"$DB_SCHEMA\".\"_metadata\"
+          SET value = '$LAST_ID'
+          WHERE key = 'lastProcessedHeight'; "
+    OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+    echo $OUTPUT
     redis-cmd SET $SORTED_POINTER $LAST_ID
     # if (( LAST_ID + 1 != start )); then
     #     echo "GAPPPP" $LAST_ID $start

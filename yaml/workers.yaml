@@ -42,6 +42,10 @@ spec:
           value: "redis-service"
         - name: REDIS_PASSWORD
           value: "YourSecurePassword"
+        - name: DB_SCHEMA
+          value: "polygon-raw-0506"
+        - name: CREDENTIALS
+          value: "***"
         volumeMounts:
         - mountPath: /workdir
           name: cache-volume

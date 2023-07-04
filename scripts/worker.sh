@@ -17,6 +17,9 @@ GROUP_ID="${PROJECT_ID}-gp"
 WORKER_ID="${HOSTNAME:-myid}"
 INFO_FILE="${WORKER_ID}-JOB"
 JOB_LINES=10
+ENABLE_BACKUP=${ENABLE_BACKUP:-false}
+ENDPOINT_BACKUP=${ENDPOINT_BACKUP:-https://polygon-rpc.com}
+ENDPOINT_BACKUP_TAG=${ENDPOINT_BACKUP_TAG:-polygon.api.onfinality.io}
 declare -A JOB
 
 UPLOADED_SET="${PROJECT_ID}uploaded:set"
@@ -26,6 +29,143 @@ LAST_ID=$(redis-cmd get $SORTED_POINTER); [[ -z "$LAST_ID" ]] && LAST_ID="-1"
 # BUCKET_NAME="${BUCKET_NAME}"
 
 gcloud auth activate-service-account --key-file /gskey/gskey.json
+
+DB_HOST=${DB_HOST:-cockroachdb.cockroachdb}
+DB_PORT=${DB_PORT:-26257}
+DATABASE=${DATABASE:-postgres}
+WORKER=$WORKER_ID
+DB_SCHEMA=${DB_SCHEMA:-polygon-raw-0506}
+DB_DATA_TABLE_LOGS=${DB_DATA_TABLE_LOGS:-evm_logs_tmp}
+DB_DATA_TABLE_TXS=${DB_DATA_TABLE_TXS:-evm_transactions_tmp}
+CREDENTIALS=${CREDENTIALS}
+
+load_logs() {
+
+  SQL="CREATE TABLE IF NOT EXISTS \"$DB_SCHEMA\".evm_logs_tmp_${WORKER//-/_} (
+          log_index BIGINT NULL,
+          transaction_hash VARCHAR NULL,
+          transaction_index INT8 NULL,
+          address VARCHAR NULL,
+          data STRING NULL,
+          topics STRING NULL,
+          block_timestamp TIMESTAMP NULL,
+          block_number BIGINT NULL,
+          block_hash VARCHAR NULL
+  );"
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+
+  SQL="TRUNCATE table \"$DB_SCHEMA\".evm_logs_tmp_${WORKER//-/_}"
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+  date
+  
+  SQL="
+  IMPORT INTO \"$DB_SCHEMA\".evm_logs_tmp_${WORKER//-/_} (log_index,transaction_hash,transaction_index,block_hash,block_number,address,data,topics)
+      CSV DATA (
+          'gs://$LOGS_CSVPATH?CREDENTIALS=$CREDENTIALS'
+      );
+  "
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+  
+  
+  SQL="
+  UPSERT INTO \"$DB_SCHEMA\".$DB_DATA_TABLE_LOGS (
+      id,
+      address,
+      block_height,
+      topics0,
+      topics1,
+      topics2,
+      topics3
+  )
+  SELECT
+      block_number || '-' || log_index,
+      address,
+      block_number,
+      split_part(topics, ',', 1),
+      split_part(topics, ',', 2),
+      split_part(topics, ',', 3),
+      split_part(topics, ',', 4)
+  FROM \"$DB_SCHEMA\".evm_logs_tmp_${WORKER//-/_};
+  "
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+  date
+
+  SQL="TRUNCATE table \"$DB_SCHEMA\".evm_logs_tmp_${WORKER//-/_}"
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+  date
+}
+
+load_transactions() {
+
+  SQL="CREATE TABLE IF NOT EXISTS \"$DB_SCHEMA\".evm_transactions_tmp_${WORKER//-/_} (
+         hash VARCHAR NULL,
+         nonce BIGINT NULL,
+         transaction_index INT8 NULL,
+         from_address VARCHAR NULL,
+         to_address VARCHAR NULL,
+         value DECIMAL NULL,
+         gas BIGINT NULL,
+         gas_price BIGINT NULL,
+         input STRING NULL,
+         block_timestamp VARCHAR NULL,
+         block_number BIGINT NULL,
+         block_hash VARCHAR NULL,
+         max_fee_per_gas VARCHAR NULL,
+         max_priority_fee_per_gas VARCHAR NULL,
+         transaction_type BIGINT NULL
+  );"
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+
+  SQL="TRUNCATE table \"$DB_SCHEMA\".evm_transactions_tmp_${WORKER//-/_}"
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+  date
+  
+  SQL="
+  IMPORT INTO \"$DB_SCHEMA\".evm_transactions_tmp_${WORKER//-/_} (hash,nonce,block_hash,block_number,transaction_index,from_address,to_address,value,gas,gas_price,input,block_timestamp,max_fee_per_gas,max_priority_fee_per_gas,transaction_type)
+      CSV DATA (
+          'gs://$TXS_CSVPATH?CREDENTIALS=$CREDENTIALS'
+      );
+  "
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+  
+  
+  SQL="
+  UPSERT INTO \"$DB_SCHEMA\".$DB_DATA_TABLE_TXS (
+      id,
+      tx_hash,
+      \"from\",
+      \"to\",
+      func,
+      block_height,
+      success
+  )
+  SELECT
+      block_number || '-' || transaction_index,
+      \"hash\",
+      from_address,
+      COALESCE(to_address, ''),
+      SUBSTRING(input, 1, 10),
+      block_number,
+      CAST(1 AS BOOL)
+  FROM \"$DB_SCHEMA\".evm_transactions_tmp_${WORKER//-/_};
+  "
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+  date
+
+  SQL="TRUNCATE table \"$DB_SCHEMA\".evm_transactions_tmp_${WORKER//-/_}"
+  OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
+  echo $OUTPUT
+  date
+}
 
 
 function readJob() {
@@ -51,7 +191,15 @@ function processJob() {
     mkdir -p $WKDIR  && cd $WKDIR
     ethereumetl export_blocks_and_transactions --start-block $START --end-block $END --blocks-output blocks.csv --transactions-output transactions.csv --provider-uri $ENDPOINT --max-workers 4 --batch-size 8
     ethereumetl extract_csv_column --input transactions.csv --column hash --output transaction_hashes.txt
-    ethereumetl export_receipts_and_logs --transaction-hashes transaction_hashes.txt --receipts-output receipts.csv --logs-output logs.csv --provider-uri $ENDPOINT --max-workers 4 --batch-size 8
+    if [ "$ENABLE_BACKUP" = "true" ]; then
+        if [ "`cut -d',' -f6 transactions.csv | grep -m 1 0x0000000000000000000000000000000000000000`" == "0x0000000000000000000000000000000000000000" ]; then
+          ethereumetl export_receipts_and_logs --transaction-hashes transaction_hashes.txt --receipts-output receipts.csv --logs-output logs.csv --provider-uri $ENDPOINT_BACKUP --max-workers 4 --batch-size 8
+        else
+          ethereumetl export_receipts_and_logs --transaction-hashes transaction_hashes.txt --receipts-output receipts.csv --logs-output logs.csv --provider-uri $ENDPOINT --max-workers 4 --batch-size 8
+        fi
+    else
+        ethereumetl export_receipts_and_logs --transaction-hashes transaction_hashes.txt --receipts-output receipts.csv --logs-output logs.csv --provider-uri $ENDPOINT --max-workers 4 --batch-size 8
+    fi
     ethereumetl extract_token_transfers --logs logs.csv --output token_transfers.csv --max-workers 10
     ethereumetl extract_csv_column --input receipts.csv --column contract_address --output contract_addresses.txt
     ethereumetl export_contracts --contract-addresses contract_addresses.txt --provider-uri $ENDPOINT --output contracts.csv --max-workers 4 --batch-size 8
@@ -82,6 +230,11 @@ function processJob() {
     cd ..
 
     gsutil -m cp -r -n ${WKDIR} gs://${BUCKET_NAME}/cache/
+
+    LOGS_CSVPATH="${BUCKET_NAME}/cache/${WKDIR}/logs/$PartitionPath/$RangeFileName"
+    TXS_CSVPATH="${BUCKET_NAME}/cache/${WKDIR}/transactions/$PartitionPath/$RangeFileName"
+    load_logs
+    load_transactions
 
     rm -rf ${WKDIR}
 }
