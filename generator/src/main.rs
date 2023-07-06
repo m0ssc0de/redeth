@@ -1,5 +1,6 @@
 use dotenv::dotenv;
 use redis::{Client, Commands};
+// use std::arch::x86_64::_mm_extract_epi64;
 use std::env;
 use std::{thread, time};
 use utils::get_block_number;
@@ -8,7 +9,6 @@ mod errors;
 mod types;
 mod utils;
 
-// const MAX_JOB_SIZE: u64 = 2;
 const MINI_PARTITION_SIZE: u64 = 1000;
 
 fn main() -> Result<(), errors::Error> {
@@ -27,27 +27,23 @@ fn main() -> Result<(), errors::Error> {
     let redis_key_job_start = format!("{}-job-start", project_id);
     let redis_key_max_job_size = format!("{}-max-job-size", project_id);
 
-    println!("hi");
-
-    // let url = "https://polygon.api.onfinality.io/rpc?apikey=bb33ca96-9719-497e-bf06-c291ffed46b4";
-    // let url = "https://polygon-rpc.com/";
-    // let bucket = "moss-temp";
-
     // Connect to Redis
     let client = Client::open(redis_entrypoint)?;
     let mut conn = client.get_connection()?;
 
-    // let mut start = 42719300;
-    let mut start: u64 = match conn.get(redis_key_job_start.clone())? {
-        Some(v) => v,
-        None => 0,
+    let mut state = types::State {
+        start: match conn.get(redis_key_job_start.clone())? {
+            Some(v) => v,
+            None => 0,
+        },
+        end: get_block_number(&chain_entrypoint, &chain_label, chain_offset)?,
+        max_job_size: match conn.get(redis_key_max_job_size.clone())? {
+            Some(v) => v,
+            None => 10,
+        },
     };
-    let mut end = get_block_number(&chain_entrypoint, &chain_label, chain_offset)?;
-    println!("main from start {} end {}", start, end);
+    println!("main state {:#?}", state);
 
-    let mut max_job_size = 10;
-
-    // let mut con = client.get_connection()?;
     let _ = redis::cmd("XGROUP")
         .arg("CREATE")
         .arg(redis_stream_name.clone())
@@ -56,11 +52,10 @@ fn main() -> Result<(), errors::Error> {
         .arg("MKSTREAM")
         .query::<()>(&mut conn);
 
-    while start <= end {
-        println!("{}", "start while");
-        max_job_size = match conn.get(redis_key_max_job_size.clone())? {
+    while state.start <= state.end {
+        state.max_job_size = match conn.get(redis_key_max_job_size.clone())? {
             Some(v) => v,
-            None => max_job_size,
+            None => state.max_job_size,
         };
         let group: types::Group = match conn
             .xinfo_groups::<&str, Vec<types::Group>>(&redis_stream_name.clone())?
@@ -85,68 +80,55 @@ fn main() -> Result<(), errors::Error> {
             group.consumers * 2 - group.lag
         };
 
-        if start == end {
+        // produce job
+
+        if state.start == state.end {
             println!("no more blocks");
             thread::sleep(time::Duration::from_secs(1));
             if let Ok(update) = get_block_number(&chain_entrypoint, &chain_label, chain_offset) {
-                if update > end {
-                    end = update;
-                    println!("update to {}", end);
+                if update > state.end {
+                    state.end = update;
+                    println!("update to {}", state.end);
                 }
             }
             continue;
         }
 
-        let jobs_start = if start == 0 { start } else { start + 1 };
-        let jobs_end = (jobs_start + jobs_cache_size * max_job_size)
-            .min((jobs_start / MINI_PARTITION_SIZE + 1) * MINI_PARTITION_SIZE - 1)
-            .min(end);
-
-        println!(
-            "jobs_cache_size {} jobs_start {} jobs_end {} start {} end {}",
-            jobs_cache_size, jobs_start, jobs_end, start, end
-        );
-
-        for i in 0..jobs_cache_size {
-            let (job_start, job_end) = if jobs_end != (jobs_start + jobs_cache_size * max_job_size)
-            {
-                (jobs_start, jobs_end)
-            } else {
-                (
-                    jobs_start + i * max_job_size,
-                    jobs_start + i * max_job_size + max_job_size - 1,
-                )
-            };
-
-            let job_params = &[
-                ("START", job_start.to_string()),
-                ("END", job_end.to_string()),
-                ("API", chain_entrypoint.to_owned()),
-                ("BUCKET", google_bucket_name.to_owned()),
-            ];
-            println!("CREATE JOB  {} - {}", job_start, job_end);
-
-            conn.xadd(redis_stream_name.clone(), "*", job_params)?;
-            start = job_end;
-            let _ = conn.set(redis_key_job_start.clone(), start)?;
-            if jobs_end == job_end {
-                println!("time to break for start {} end {}", start, end);
-                break;
+        for _ in 0..jobs_cache_size {
+            if state.start <= state.end {
+                let job = types::Job {
+                    start: state.start,
+                    end: state
+                        .end
+                        .min((state.start / MINI_PARTITION_SIZE + 1) * MINI_PARTITION_SIZE - 1)
+                        .min(state.start + state.max_job_size - 1),
+                    endpoint: chain_entrypoint.to_owned(),
+                    bucket: google_bucket_name.to_owned(),
+                };
+                println!("{:#?}", job);
+                let job_params = &[
+                    ("START", job.start.to_string()),
+                    ("END", job.end.to_string()),
+                    ("API", job.endpoint),
+                    ("BUCKET", job.bucket),
+                ];
+                conn.xadd(redis_stream_name.clone(), "*", job_params)?;
+                state.start = job.end + 1;
+                let _ = conn.set(redis_key_job_start.clone(), state.start)?;
             }
         }
-        // 1. job slots were used over
-        // 2. reach partition limit
-        // 3. reach last block
 
-        // println!("need more jobs");
-        if let Ok(update) = get_block_number(&chain_entrypoint, &chain_label, chain_offset) {
-            if update > end {
-                end = update;
-                println!("update to {}", end);
+        while state.start > state.end {
+            if let Ok(update) = get_block_number(&chain_entrypoint, &chain_label, chain_offset) {
+                if update > state.end {
+                    state.end = update;
+                    println!("update to {}", state.end);
+                }
             }
+            thread::sleep(time::Duration::from_secs(3));
         }
-        thread::sleep(time::Duration::from_secs(1));
-        println!("in the end of wile start {} end {}", start, end)
+        println!("{:#?}", state);
+        thread::sleep(time::Duration::from_secs(3));
     }
 
     Ok(())

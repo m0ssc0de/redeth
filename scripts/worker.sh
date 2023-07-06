@@ -71,7 +71,7 @@ load_logs() {
   
   
   SQL="
-  UPSERT INTO \"$DB_SCHEMA\".$DB_DATA_TABLE_LOGS (
+  INSERT INTO \"$DB_SCHEMA\".$DB_DATA_TABLE_LOGS (
       id,
       address,
       block_height,
@@ -88,7 +88,7 @@ load_logs() {
       split_part(topics, ',', 2),
       split_part(topics, ',', 3),
       split_part(topics, ',', 4)
-  FROM \"$DB_SCHEMA\".evm_logs_tmp_${WORKER//-/_};
+  FROM \"$DB_SCHEMA\".evm_logs_tmp_${WORKER//-/_} ON CONFLICT DO NOTHING;
   "
   OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
   echo $OUTPUT
@@ -138,7 +138,7 @@ load_transactions() {
   
   
   SQL="
-  UPSERT INTO \"$DB_SCHEMA\".$DB_DATA_TABLE_TXS (
+  INSERT INTO \"$DB_SCHEMA\".$DB_DATA_TABLE_TXS (
       id,
       tx_hash,
       \"from\",
@@ -155,7 +155,7 @@ load_transactions() {
       SUBSTRING(input, 1, 10),
       block_number,
       CAST(1 AS BOOL)
-  FROM \"$DB_SCHEMA\".evm_transactions_tmp_${WORKER//-/_};
+  FROM \"$DB_SCHEMA\".evm_transactions_tmp_${WORKER//-/_} ON CONFLICT DO NOTHING;
   "
   OUTPUT=$(psql -h "$DB_HOST" -p "$DB_PORT" -d "$DATABASE" -c "$SQL")
   echo $OUTPUT
