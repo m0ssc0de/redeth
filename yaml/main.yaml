@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: polygon-main
+spec:
+  replicas: 1
+  serviceName: polygon-main
+  selector:
+    matchLabels:
+      app: polygon-main
+  template:
+    metadata:
+      labels:
+        app: polygon-main
+    spec:
+      volumes:
+        - name: gskey
+          secret:
+            secretName: storage-auth #kubectl create secret generic storage-auth --from-file=gskey.json=./gskey.json
+      nodeSelector:
+        "onfinality.io/role": sub
+      tolerations:
+        - key: "onfinality.io/role"
+          operator: "Equal"
+          value: "sub"
+          effect: "NoSchedule"
+      containers:
+        - name: gen
+          image: yesq/generator
+          command: ["/bin/bash", "-c"]
+          args: ["generator"]
+          env:
+            - name: PROJECT_ID
+              value: "polygon"
+            - name: CHAIN_ENTRYPOINT
+              value: "https://polygon.api.onfinality.io/rpc?apikey="
+            - name: CHAIN_LABEL
+              value: "latest"
+            - name: CHAIN_OFFSET
+              value: "300"
+            - name: GOOGLE_BUCKET_NAME
+              value: "subquery-polygon-chain"
+            - name: REDIS_ENTRYPOINT
+              value: "redis://:YourSecurePassword@redis-service/"
+        - name: sorter
+          image: yesq/scripts:new
+          command: ["/bin/bash", "-c"]
+          args: ["/sorter.sh"]
+          workingDir: /workdir
+          env:
+            - name: PROJECT_ID
+              value: "polygon"
+            - name: REDIS_HOST
+              value: "redis-service"
+            - name: REDIS_PASSWORD
+              value: "YourSecurePassword"
+            - name: DB_SCHEMA
+              value: "polygon-raw-0506"
+          volumeMounts:
+            - name: gskey
+              mountPath: /gskey/
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: polygon-main
+spec:
+  selector:
+    app: polygon-main
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 80
